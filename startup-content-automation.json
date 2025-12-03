@@ -1,0 +1,342 @@
+{
+  "name": "Startup Content Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4.8
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule (5x Daily)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://techcrunch.com/category/artificial-intelligence/",
+        "options": {}
+      },
+      "id": "scrape-techcrunch",
+      "name": "Scrape TechCrunch AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://www.ycombinator.com/blog",
+        "options": {}
+      },
+      "id": "scrape-yc",
+      "name": "Scrape Y Combinator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://news.ycombinator.com/best",
+        "options": {}
+      },
+      "id": "scrape-hackernews",
+      "name": "Scrape Hacker News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition"
+      },
+      "id": "merge-scrapes",
+      "name": "Merge Scraped Content",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst htmlContent = items.map(item => item.json.data || item.json.body || '').join('\\n');\n\n// Extract article titles and links using regex\nconst titlePattern = /<h2[^>]*>.*?<a[^>]*href=\"([^\"]*)\"[^>]*>(.*?)<\\/a>.*?<\\/h2>/gi;\nconst matches = [...htmlContent.matchAll(titlePattern)];\n\nconst articles = matches.slice(0, 5).map(match => ({\n  url: match[1],\n  title: match[2].replace(/<[^>]*>/g, '').trim()\n}));\n\n// Pick one random article\nconst randomArticle = articles[Math.floor(Math.random() * articles.length)];\n\nreturn [{\n  json: {\n    topic: randomArticle.title,\n    sourceUrl: randomArticle.url,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "extract-topic",
+      "name": "Extract Random Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "model": "grok-beta",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 280
+        },
+        "prompt": "=You are a viral startup content creator. Based on this topic: \"{{ $json.topic }}\"\n\nCreate an engaging X (Twitter) post that:\n- Hooks attention in the first line\n- Shares a valuable insight about startups, business, or AI\n- Includes a call-to-action or thought-provoking question\n- Uses 2-3 relevant hashtags\n- Stays under 280 characters\n\nMake it conversational, actionable, and share-worthy."
+      },
+      "id": "langchain-grok",
+      "name": "LangChain GROK",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const topic = $json.topic;\n\n// Create Midjourney prompt for startup/business themed image\nconst prompt = `professional minimalist startup illustration, ${topic.substring(0, 100)}, modern gradient colors, tech aesthetic, clean design, business concept art, 16:9 aspect ratio --ar 16:9 --style raw --v 6`;\n\nreturn [{\n  json: {\n    ...($json),\n    postContent: $json.text || $json.response,\n    midjourneyPrompt: prompt\n  }\n}];"
+      },
+      "id": "prepare-image-prompt",
+      "name": "Prepare Image Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "requestMethod": "POST",
+        "url": "https://api.midjourneyapi.xyz/mj/v2/imagine",
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"prompt\": \"{{ $json.midjourneyPrompt }}\",\n  \"aspect_ratio\": \"16:9\",\n  \"process_mode\": \"fast\"\n}",
+        "options": {}
+      },
+      "id": "midjourney-generate",
+      "name": "Midjourney API Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "midjourney-api-key",
+          "name": "Midjourney API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "wait-for-image",
+      "name": "Wait for Image Generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "headerAuth",
+        "requestMethod": "GET",
+        "url": "=https://api.midjourneyapi.xyz/mj/v2/fetch?task_id={{ $json.task_id }}",
+        "options": {}
+      },
+      "id": "midjourney-fetch",
+      "name": "Fetch Midjourney Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1850, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "midjourney-api-key",
+          "name": "Midjourney API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "={{ $json.image_url || $json.task_result.image_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-image",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2050, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "text": "={{ $('Prepare Image Prompt').item.json.postContent }}",
+        "additionalFields": {
+          "attachments": "={{ $json.data }}"
+        }
+      },
+      "id": "post-to-x",
+      "name": "Post to X (Twitter)",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [2250, 300],
+      "credentials": {
+        "twitterOAuth2Api": {
+          "id": "twitter-oauth",
+          "name": "X (Twitter) OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule (5x Daily)": {
+      "main": [
+        [
+          {
+            "node": "Scrape TechCrunch AI",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scrape Y Combinator",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scrape Hacker News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape TechCrunch AI": {
+      "main": [
+        [
+          {
+            "node": "Merge Scraped Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Y Combinator": {
+      "main": [
+        [
+          {
+            "node": "Merge Scraped Content",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Scrape Hacker News": {
+      "main": [
+        [
+          {
+            "node": "Merge Scraped Content",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Scraped Content": {
+      "main": [
+        [
+          {
+            "node": "Extract Random Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Random Topic": {
+      "main": [
+        [
+          {
+            "node": "LangChain GROK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LangChain GROK": {
+      "main": [
+        [
+          {
+            "node": "Prepare Image Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Image Prompt": {
+      "main": [
+        [
+          {
+            "node": "Midjourney API Generate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Midjourney API Generate": {
+      "main": [
+        [
+          {
+            "node": "Wait for Image Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Image Generation": {
+      "main": [
+        [
+          {
+            "node": "Fetch Midjourney Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Midjourney Result": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Post to X (Twitter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-03T00:00:00.000Z",
+  "versionId": "1"
+}
